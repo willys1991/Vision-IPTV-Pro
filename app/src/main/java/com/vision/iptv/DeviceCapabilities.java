@@ -7,6 +7,19 @@ import android.app.ActivityManager;
 import android.content.Context;
 
 final class DeviceCapabilities {
+ static final class Profile {
+ final int maxHeight,bufferMb,minSec,maxSec;final boolean economical;final String reason;
+ Profile(int h,int b,int min,int max,boolean eco,String why){maxHeight=h;bufferMb=b;minSec=min;maxSec=max;economical=eco;reason=why;}
+ }
+ static Profile recommend(Context context,Display display){
+ ActivityManager am=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo();am.getMemoryInfo(mem);
+ boolean low=am.isLowRamDevice()||am.getMemoryClass()<=128||mem.totalMem<1536L*1048576;
+ boolean uhd=false;try{for(MediaCodecInfo info:new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()){if(info.isEncoder())continue;boolean hardware=Build.VERSION.SDK_INT>=29?info.isHardwareAccelerated():!(info.getName().startsWith("OMX.google.")||info.getName().startsWith("c2.android."));if(!hardware)continue;for(String mime:new String[]{"video/hevc","video/avc","video/av01","video/x-vnd.on2.vp9"})try{MediaCodecInfo.VideoCapabilities v=info.getCapabilitiesForType(mime).getVideoCapabilities();if(v!=null&&v.areSizeAndRateSupported(3840,2160,30))uhd=true;}catch(RuntimeException ignored){}}}catch(RuntimeException ignored){}
+ boolean screen4k=false;if(display!=null)try{for(Display.Mode mode:display.getSupportedModes())if(mode.getPhysicalWidth()>=3840&&mode.getPhysicalHeight()>=2160)screen4k=true;}catch(RuntimeException ignored){}
+ if(low)return new Profile(1080,24,8,20,true,"Ограниченная память");
+ if(uhd&&screen4k&&mem.totalMem>=2500L*1048576)return new Profile(2160,64,15,40,false,"Заявлен 4K-декодер и 4K-экран");
+ return new Profile(1080,48,12,35,false,"Сбалансированный профиль");
+ }
  static String report(Context context,Display display){
   StringBuilder s=new StringBuilder(Build.MANUFACTURER+" "+Build.MODEL+"\nAndroid "+Build.VERSION.RELEASE+" (API "+Build.VERSION.SDK_INT+")\n");
   ActivityManager am=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
