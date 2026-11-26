@@ -24,8 +24,9 @@ final class NasSecrets {
   String value=Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(cipher.doFinal(data.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
   if(!prefs(c).edit().putString(id,value).commit())throw new java.io.IOException("Credential storage failed");
  }
+ static boolean contains(Context c,String id){return prefs(c).contains(id);}
  static String[] read(Context c,String id)throws Exception{
-  String value=prefs(c).getString(id,null);if(value==null)throw new java.io.IOException("Credentials missing");String[] parts=value.split(":",2);
+  String value=prefs(c).getString(id,null);if(value==null)throw new java.io.IOException("Credentials missing");String[] parts=value.split(":",2);if(parts.length!=2)throw new java.io.IOException("Invalid credential format");
   Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));cipher.updateAAD(id.getBytes(StandardCharsets.UTF_8));
   org.json.JSONArray a=new org.json.JSONArray(new String(cipher.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),StandardCharsets.UTF_8));return new String[]{a.getString(0),a.getString(1)};
  }
