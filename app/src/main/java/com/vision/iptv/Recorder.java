@@ -9,7 +9,9 @@ final class Recorder {
  volatile HttpURLConnection connection;
  volatile Thread worker;
  volatile String lastError="";
- volatile Runnable retentionCleanup; volatile int maxHeight=0; volatile long quotaBytes=0; private long written=0,existing=0;
+ interface Destination {OutputStream open() throws Exception;}
+ volatile Destination destination; volatile Runnable retentionCleanup; volatile int maxHeight=0; volatile long quotaBytes=0; volatile long written=0; private long existing=0;
+ private OutputStream output(File file)throws Exception{Destination d=destination;return new BufferedOutputStream(d==null?new FileOutputStream(file):d.open());}
  volatile String userAgent="VisionIPTV/1.0";
  private HttpURLConnection open(URL url)throws IOException{
   if(!"http".equals(url.getProtocol())&&!"https".equals(url.getProtocol()))throw new IOException("HTTP(S) only");
@@ -25,11 +27,11 @@ final class Recorder {
     try(BufferedInputStream in=new BufferedInputStream(c.getInputStream())){
      URL resolved=c.getURL();in.mark(16);byte[] head=new byte[7];int n=0;while(n<head.length){int k=in.read(head,n,head.length-n);if(k<0)break;n+=k;}in.reset();
      if(n==7&&"#EXTM3U".equals(new String(head,StandardCharsets.US_ASCII))){String playlist=readText(in);c.disconnect();connection=null;recordHls(resolved,playlist,file);}
-     else if(n>0&&(head[0]&255)==71){try(OutputStream out=new BufferedOutputStream(new FileOutputStream(file))){byte[] b=new byte[65536];int k;long check=0;while(running&&(k=in.read(b))!=-1){if(!running)break;if(check<=0){space(file.getParentFile());check=4L*1024*1024;}quota(k);out.write(b,0,k);written+=k;check-=k;}}}
+     else if(n>0&&(head[0]&255)==71){try(OutputStream out=output(file)){byte[] b=new byte[65536];int k;long check=0;while(running&&(k=in.read(b))!=-1){if(!running)break;if(check<=0){space(file.getParentFile());check=4L*1024*1024;}quota(k);out.write(b,0,k);written+=k;check-=k;}}}
      else throw new IOException("Поддерживаются MPEG-TS и HLS MPEG-TS");
     }finally{c.disconnect();}
    }catch(Exception e){if(running)lastError=e.getMessage()==null?"Ошибка записи":e.getMessage();}
-   finally{HttpURLConnection c=connection;if(c!=null)c.disconnect();if(file.length()==0)file.delete();synchronized(this){connection=null;running=false;worker=null;}finished.run();}
+   finally{HttpURLConnection c=connection;if(c!=null)c.disconnect();if(destination==null&&file.length()==0)file.delete();synchronized(this){connection=null;running=false;worker=null;}finished.run();}
   },"VisionRecorder");worker.start();return true;
  }
  private String readText(InputStream in)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];int n;while(running&&(n=in.read(b))!=-1){if(out.size()+n>2097152)throw new IOException("Слишком большой HLS плейлист");out.write(b,0,n);}return out.toString("UTF-8");}
@@ -43,7 +45,7 @@ final class Recorder {
  }
  private void recordHls(URL url,String text,File file)throws Exception{
   Playlist p=media(new Playlist(url,text));long last=-1;int idle=0;
-  try(OutputStream out=new BufferedOutputStream(new FileOutputStream(file))){
+  try(OutputStream out=output(file)){
    while(running){
     if(!p.text.startsWith("#EXTM3U")||p.text.contains("#EXT-X-MAP")||p.text.contains("#EXT-X-BYTERANGE")||p.text.contains("#EXT-X-DISCONTINUITY")||p.text.contains("#EXT-X-GAP"))throw new IOException("Неподдерживаемый тип HLS");
     long seq=0;boolean hasSeq=false,segment=false;int target=6,added=0;
@@ -63,7 +65,7 @@ final class Recorder {
  private boolean copySegment(URL url,File file,OutputStream out)throws IOException{
   File tmp=File.createTempFile("segment_",".tmp",file.getParentFile());HttpURLConnection c=null;
   try{c=open(url);long total=0;try(InputStream in=c.getInputStream();OutputStream temp=new BufferedOutputStream(new FileOutputStream(tmp))){byte[] b=new byte[65536];int n;while(running&&(n=in.read(b))!=-1){if(total==0&&(b[0]&255)!=71)throw new IOException("Сегмент не MPEG-TS");if(total+n>64L*1024*1024)throw new IOException("Слишком большой сегмент");space(file.getParentFile());temp.write(b,0,n);total+=n;}}
-   if(!running)return false;if(total==0||total%188!=0)throw new IOException("Повреждённый MPEG-TS сегмент");if(file.getParentFile().getUsableSpace()<RESERVE+total)throw new IOException("Недостаточно места");
+   if(!running)return false;if(total==0||total%188!=0)throw new IOException("Повреждённый MPEG-TS сегмент");if(destination==null&&file.getParentFile().getUsableSpace()<RESERVE+total)throw new IOException("Недостаточно места");
    quota(total);try(InputStream in=new FileInputStream(tmp)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}written+=total;return true;
   }finally{if(c!=null)c.disconnect();connection=null;tmp.delete();}
  }
