@@ -15,7 +15,7 @@ final class Recorder {
  volatile String userAgent="VisionIPTV/1.0";
  private HttpURLConnection open(URL url)throws IOException{
   if(!"http".equals(url.getProtocol())&&!"https".equals(url.getProtocol()))throw new IOException("HTTP(S) only");
-  HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setConnectTimeout(15000);c.setReadTimeout(15000);c.setRequestProperty("User-Agent",userAgent);connection=c;return c;
+  return NetworkPolicy.open(url,15000,15000,userAgent,false,c->connection=c);
  }
  private void quota(long next)throws IOException{if(quotaBytes>0&&existing+written+next>quotaBytes)throw new IOException("Достигнут лимит записей");}
  private void space(File parent)throws IOException{if(parent==null||parent.getUsableSpace()<RESERVE)throw new IOException("Недостаточно свободного места");}
