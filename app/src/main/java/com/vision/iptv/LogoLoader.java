@@ -1,0 +1,9 @@
+package com.vision.iptv;
+import android.graphics.*;import android.os.*;import android.util.LruCache;import android.widget.ImageView;import java.io.*;import java.net.*;import java.util.concurrent.*;
+final class LogoLoader {
+ private final LruCache<String,Bitmap> cache=new LruCache<String,Bitmap>(8*1024*1024){@Override protected int sizeOf(String k,Bitmap b){return b.getByteCount();}};
+ private final ThreadPoolExecutor pool=new ThreadPoolExecutor(3,3,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(64),new ThreadPoolExecutor.DiscardOldestPolicy());
+ private final Handler main=new Handler(Looper.getMainLooper());
+ void bind(ImageView view,String url){view.setTag(url);view.setImageDrawable(null);if(url==null||!(url.startsWith("http://")||url.startsWith("https://")))return;Bitmap cached=cache.get(url);if(cached!=null){view.setImageBitmap(cached);return;}pool.execute(()->{HttpURLConnection c=null;try{c=(HttpURLConnection)new URL(url).openConnection();c.setConnectTimeout(5000);c.setReadTimeout(5000);ByteArrayOutputStream bytes=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){if(bytes.size()+n>2097152)return;bytes.write(b,0,n);}}byte[] data=bytes.toByteArray();BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(data,0,data.length,o);if(o.outWidth<=0||o.outHeight<=0)return;o.inJustDecodeBounds=false;o.inSampleSize=1;while(Math.max(o.outWidth,o.outHeight)/o.inSampleSize>256)o.inSampleSize*=2;Bitmap bitmap=BitmapFactory.decodeByteArray(data,0,data.length,o);if(bitmap==null)return;cache.put(url,bitmap);main.post(()->{if(url.equals(view.getTag()))view.setImageBitmap(bitmap);});}catch(Exception ignored){}finally{if(c!=null)c.disconnect();}});}
+ void close(){pool.shutdownNow();main.removeCallbacksAndMessages(null);cache.evictAll();}
+}
