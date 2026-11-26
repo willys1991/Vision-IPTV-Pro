@@ -27,16 +27,19 @@ final class Recorder {
     try(BufferedInputStream in=new BufferedInputStream(c.getInputStream())){
      URL resolved=c.getURL();in.mark(16);byte[] head=new byte[7];int n=0;while(n<head.length){int k=in.read(head,n,head.length-n);if(k<0)break;n+=k;}in.reset();
      if(n==7&&"#EXTM3U".equals(new String(head,StandardCharsets.US_ASCII))){String playlist=readText(in);c.disconnect();connection=null;recordHls(resolved,playlist,file);}
-     else if(n>0&&(head[0]&255)==71){try(OutputStream out=output(file)){byte[] b=new byte[65536];int k;long check=0;while(running&&(k=in.read(b))!=-1){if(!running)break;if(check<=0){space(file.getParentFile());check=4L*1024*1024;}quota(k);out.write(b,0,k);written+=k;check-=k;}}}
+     else if(n>0&&(head[0]&255)==71){try(OutputStream out=output(file)){byte[] b=new byte[65536];int k;long check=0;while(running&&(k=in.read(b))!=-1){if(!running)break;if(check<=0){space(file.getParentFile());check=4L*1024*1024;}quota(k);out.write(b,0,k);written+=k;check-=k;}if(running)throw new EOFException("Поток MPEG-TS неожиданно завершился");}}
      else throw new IOException("Поддерживаются MPEG-TS и HLS MPEG-TS");
     }finally{c.disconnect();}
-   }catch(Exception e){if(running)lastError=e.getMessage()==null?"Ошибка записи":e.getMessage();}
+   }catch(Exception e){if(running)lastError=e instanceof java.net.SocketTimeoutException?"Тайм-аут сети":e instanceof java.net.SocketException||e instanceof java.net.UnknownHostException?"Ошибка сетевого соединения":e instanceof EOFException?"Поток неожиданно завершился":"Ошибка записи ("+e.getClass().getSimpleName()+")";}
    finally{HttpURLConnection c=connection;if(c!=null)c.disconnect();if(destination==null&&file.length()==0)file.delete();synchronized(this){connection=null;running=false;worker=null;}finished.run();}
   },"VisionRecorder");worker.start();return true;
  }
  private String readText(InputStream in)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];int n;while(running&&(n=in.read(b))!=-1){if(out.size()+n>2097152)throw new IOException("Слишком большой HLS плейлист");out.write(b,0,n);}return out.toString("UTF-8");}
  private static final class Playlist{URL url;String text;Playlist(URL u,String t){url=u;text=t;}}
- private Playlist fetch(URL url)throws IOException{HttpURLConnection c=open(url);try(InputStream in=c.getInputStream()){return new Playlist(c.getURL(),readText(in));}finally{c.disconnect();connection=null;}}
+ private Playlist fetchOnce(URL url)throws IOException{HttpURLConnection c=open(url);try(InputStream in=c.getInputStream()){return new Playlist(c.getURL(),readText(in));}finally{c.disconnect();connection=null;}}
+ private interface NetworkRead<T>{T run()throws IOException;}
+ private <T> T retryRead(NetworkRead<T> action)throws IOException{IOException failure=null;for(int attempt=0;attempt<3&&running;attempt++){try{return action.run();}catch(java.net.SocketTimeoutException|java.net.UnknownHostException|java.net.SocketException e){failure=e;}catch(java.io.EOFException e){failure=e;}if(attempt<2&&running)try{Thread.sleep(1000L<<attempt);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new InterruptedIOException("Recording stopped");}}if(failure!=null)throw failure;throw new InterruptedIOException("Recording stopped");}
+ private Playlist fetch(URL url)throws IOException{return retryRead(()->fetchOnce(url));}
  private long bandwidth(String line){java.util.regex.Matcher m=java.util.regex.Pattern.compile("(?:^|[:,])BANDWIDTH=([0-9]+)").matcher(line);try{return m.find()?Long.parseLong(m.group(1)):0;}catch(Exception e){return 0;}}
  private int height(String line){java.util.regex.Matcher m=java.util.regex.Pattern.compile("(?:^|[:,])RESOLUTION=[0-9]+x([0-9]+)").matcher(line);try{return m.find()?Integer.parseInt(m.group(1)):0;}catch(Exception e){return 0;}}
  private Playlist media(Playlist p)throws IOException{
@@ -66,7 +69,7 @@ final class Recorder {
   File tmp=File.createTempFile("segment_",".tmp",file.getParentFile());HttpURLConnection c=null;
   try{c=open(url);long total=0;try(InputStream in=c.getInputStream();OutputStream temp=new BufferedOutputStream(new FileOutputStream(tmp))){byte[] b=new byte[65536];int n;while(running&&(n=in.read(b))!=-1){if(total==0&&(b[0]&255)!=71)throw new IOException("Сегмент не MPEG-TS");if(total+n>64L*1024*1024)throw new IOException("Слишком большой сегмент");space(file.getParentFile());temp.write(b,0,n);total+=n;}}
    if(!running)return false;if(total==0||total%188!=0)throw new IOException("Повреждённый MPEG-TS сегмент");if(destination==null&&file.getParentFile().getUsableSpace()<RESERVE+total)throw new IOException("Недостаточно места");
-   quota(total);try(InputStream in=new FileInputStream(tmp)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}written+=total;return true;
+   quota(total);try(InputStream in=new FileInputStream(tmp)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){out.write(b,0,n);written+=n;}}return true;
   }finally{if(c!=null)c.disconnect();connection=null;tmp.delete();}
  }
  void stop(){running=false;HttpURLConnection c=connection;if(c!=null)new Thread(c::disconnect).start();Thread t=worker;if(t!=null)t.interrupt();}
