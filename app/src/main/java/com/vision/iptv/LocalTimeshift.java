@@ -45,7 +45,7 @@ final class LocalTimeshift implements Closeable {
    Thread.sleep(Math.max(1000,target*500L));
   }}catch(Exception e){if(!closed)listener.failed(e.getMessage()==null?"Ошибка Timeshift":e.getMessage());}finally{close();}},"ShiftCapture").start();
  }
- private HttpURLConnection open(URL url)throws IOException{if(!"http".equals(url.getProtocol())&&!"https".equals(url.getProtocol()))throw new IOException("HTTP(S) only");HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setConnectTimeout(10000);c.setReadTimeout(15000);c.setRequestProperty("User-Agent",agent);upstream=c;return c;}
+ private HttpURLConnection open(URL url)throws IOException{if(!"http".equals(url.getProtocol())&&!"https".equals(url.getProtocol()))throw new IOException("HTTP(S) only");return NetworkPolicy.open(url,10000,15000,agent,false,c->upstream=c);}
  private String readPlaylist(URL url)throws IOException{HttpURLConnection c=open(url);try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buf=new byte[8192];int n;while((n=in.read(buf))!=-1){if(closed||out.size()+n>1048576)throw new IOException("Playlist limit");out.write(buf,0,n);}return out.toString("UTF-8");}finally{c.disconnect();upstream=null;}}
  private void append(long seq,double duration,URL url)throws IOException{
   if(closed||dir.getUsableSpace()<RESERVE+SEGMENT_LIMIT)throw new IOException("Недостаточно места");
