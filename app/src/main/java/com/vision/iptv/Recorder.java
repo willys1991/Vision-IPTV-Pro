@@ -1,0 +1,7 @@
+package com.vision.iptv;
+import java.io.*;import java.net.*;
+final class Recorder {
+ volatile boolean running; volatile HttpURLConnection connection; volatile Thread worker;
+ synchronized boolean start(String address,File file,Runnable finished){if(worker!=null)return false;running=true;worker=new Thread(()->{try{HttpURLConnection c=(HttpURLConnection)new URL(address).openConnection();connection=c;c.setConnectTimeout(15000);c.setReadTimeout(10000);try(InputStream in=c.getInputStream()){String type=c.getContentType();if(type!=null&&(type.contains("mpegurl")||type.contains("text/")||type.contains("dash")))throw new IOException("Unsupported stream");byte[] packet=new byte[188];new DataInputStream(in).readFully(packet);if((packet[0]&255)!=71)throw new IOException("Not MPEG TS");try(OutputStream out=new BufferedOutputStream(new FileOutputStream(file))){out.write(packet);byte[] buffer=new byte[65536];int n;while(running&&(n=in.read(buffer))!=-1)out.write(buffer,0,n);}}}catch(Exception e){if(file.length()==0)file.delete();}finally{if(connection!=null)connection.disconnect();connection=null;running=false;worker=null;finished.run();}});worker.start();return true;}
+ void stop(){running=false;HttpURLConnection c=connection;if(c!=null)new Thread(c::disconnect).start();}
+}
