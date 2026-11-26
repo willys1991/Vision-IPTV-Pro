@@ -9,7 +9,7 @@ final class Recorder {
  volatile HttpURLConnection connection;
  volatile Thread worker;
  volatile String lastError="";
- volatile int maxHeight=0; volatile long quotaBytes=0; private long written=0,existing=0;
+ volatile Runnable retentionCleanup; volatile int maxHeight=0; volatile long quotaBytes=0; private long written=0,existing=0;
  volatile String userAgent="VisionIPTV/1.0";
  private HttpURLConnection open(URL url)throws IOException{
   if(!"http".equals(url.getProtocol())&&!"https".equals(url.getProtocol()))throw new IOException("HTTP(S) only");
@@ -19,9 +19,9 @@ final class Recorder {
  private void space(File parent)throws IOException{if(parent==null||parent.getUsableSpace()<RESERVE)throw new IOException("Недостаточно свободного места");}
  synchronized boolean start(String address,File file,Runnable finished){
   if(worker!=null)return false;
-  lastError="";running=true;written=0;existing=0;File[] previous=file.getParentFile().listFiles((d,n)->n.endsWith(".ts"));if(previous!=null)for(File old:previous)existing+=old.length();
+  lastError="";running=true;written=0;existing=0;
   worker=new Thread(()->{
-   try{space(file.getParentFile());URL url=new URL(address);HttpURLConnection c=open(url);
+   try{Runnable cleanup=retentionCleanup;if(cleanup!=null)cleanup.run();File[] previous=file.getParentFile().listFiles((d,n)->n.endsWith(".ts"));if(previous!=null)for(File old:previous)existing+=old.length();space(file.getParentFile());if(!running)return;URL url=new URL(address);HttpURLConnection c=open(url);
     try(BufferedInputStream in=new BufferedInputStream(c.getInputStream())){
      URL resolved=c.getURL();in.mark(16);byte[] head=new byte[7];int n=0;while(n<head.length){int k=in.read(head,n,head.length-n);if(k<0)break;n+=k;}in.reset();
      if(n==7&&"#EXTM3U".equals(new String(head,StandardCharsets.US_ASCII))){String playlist=readText(in);c.disconnect();connection=null;recordHls(resolved,playlist,file);}
